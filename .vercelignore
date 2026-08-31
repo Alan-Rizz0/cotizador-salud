@@ -1,0 +1,13 @@
+.git
+.sites-runtime
+.openai
+drizzle
+examples
+upload
+worker
+build
+vendor
+*.xlsx
+*.xls
+*.csv
+*.tar.gz
