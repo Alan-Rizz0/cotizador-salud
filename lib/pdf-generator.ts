@@ -3,7 +3,6 @@ import type { Member, PlanResult } from "./cotizador-engine";
 
 type PdfInput = {
   quoteId: string; issueDate: string; validityDate: string;
-  seller: { name: string; phone: string };
   client: { name: string; dni: string; region: string; category: string };
   familyGroup: string; members: Member[]; plans: PlanResult[];
   selectedPlans: string[]; discountPercent: number;
@@ -22,6 +21,7 @@ export async function downloadQuotePdf(input: PdfInput) {
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const page = pdf.addPage([595, 842]);
+  const selectedPlans = input.plans.filter((plan) => input.selectedPlans.includes(plan.plan));
 
   page.drawRectangle({ x: 0, y: 752, width: 595, height: 90, color: navy });
   page.drawRectangle({ x: 0, y: 744, width: 595, height: 8, color: teal });
@@ -46,17 +46,16 @@ export async function downloadQuotePdf(input: PdfInput) {
   });
 
   const plansTop = Math.min(memberY - 18, 550);
-  text(page, bold, "COMPARACIÓN DE PLANES", 42, plansTop, 10, teal);
+  text(page, bold, "PLANES SELECCIONADOS", 42, plansTop, 10, teal);
   let cardY = plansTop - 105;
-  input.plans.forEach((plan, index) => {
+  selectedPlans.forEach((plan, index) => {
     if (index === 2) cardY -= 118;
     const x = 42 + (index % 2) * 260;
-    const selected = input.selectedPlans.includes(plan.plan);
-    page.drawRectangle({ x, y: cardY, width: 249, height: 98, color: selected ? mint : rgb(1,1,1), borderColor: selected ? teal : border, borderWidth: selected ? 2 : 1 });
+    page.drawRectangle({ x, y: cardY, width: 249, height: 98, color: mint, borderColor: teal, borderWidth: 2 });
     const accent = plan.plan === "Medifé+" ? teal : plan.plan === "Bronce" ? rgb(.63,.40,.25) : plan.plan === "Plata" ? rgb(.58,.63,.65) : navy;
     page.drawRectangle({ x, y: cardY + 92, width: 249, height: 6, color: accent });
     text(page, bold, plan.plan, x + 13, cardY + 71, 12);
-    if (selected) text(page, bold, "SELECCIONADO", x + 150, cardY + 72, 7, teal);
+    text(page, bold, "SELECCIONADO", x + 150, cardY + 72, 7, teal);
     text(page, regular, "Primera cuota", x + 13, cardY + 49, 8, gray);
     text(page, bold, money(plan.firstInstallment), x + 13, cardY + 30, 15);
     text(page, regular, `Desde cuota 13: ${money(plan.installment13)}`, x + 13, cardY + 13, 8, gray);
@@ -65,7 +64,7 @@ export async function downloadQuotePdf(input: PdfInput) {
   const detailsY = cardY - 25;
   text(page, bold, "DETALLE DE LOS PLANES SELECCIONADOS", 42, detailsY, 10, teal);
   let rowY = detailsY - 20;
-  input.plans.filter((plan) => input.selectedPlans.includes(plan.plan)).forEach((plan) => {
+  selectedPlans.forEach((plan) => {
     text(page, bold, plan.plan, 48, rowY, 9);
     text(page, regular, `Nominal: ${money(plan.listPrice)} · Ajustes: ${money(plan.permanentAdjustment + plan.filialDiscount + plan.promotionalDiscount)} · IVA/aportes: ${money(plan.ivaOrContribution)}`, 120, rowY, 8, gray);
     rowY -= 16;
@@ -77,7 +76,7 @@ export async function downloadQuotePdf(input: PdfInput) {
   text(page, regular, "Cotización válida por siete días hábiles y sujeta a actualizaciones, aumentos y ajustes.", 54, legalY + 38, 7.5, gray);
   text(page, regular, "No contempla casos de alto costo y baja incidencia. Los aportes son estimados y pueden variar.", 54, legalY + 25, 7.5, gray);
   text(page, regular, "El monto puede cambiar si se modifican los datos informados y está sujeto a incrementos.", 54, legalY + 12, 7.5, gray);
-  text(page, regular, `Asesor: ${input.seller.name} · ${input.seller.phone}`, 42, 18, 8, gray);
+  text(page, regular, `Cotización ${input.quoteId}`, 42, 18, 8, gray);
   text(page, regular, "Valores pendientes de homologación integral contra la matriz comercial.", 325, 18, 7, gray);
 
   const bytes = await pdf.save();
