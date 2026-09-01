@@ -73,3 +73,10 @@ test("aportes e IVA se calculan por caminos distintos", () => {
   const voluntary = plan({ region: "AMBA", category: "Voluntario", members: [{ id: 1, role: "Titular", age: 38 }] });
   close(mandatory.ivaOrContribution, -71145); close(voluntary.ivaOrContribution, voluntary.listPrice * .105);
 });
+
+test("descuento manual de 50% se aplica a la primera cuota", () => {
+  const q = plan({ region: "AMBA", category: "Voluntario", gafDiscount: -.50, members: [{ id: 1, role: "Titular", age: 38 }] });
+  close(q.promotionalDiscount, q.listPrice * -.50);
+  close(q.firstInstallment, q.listPrice * .50 * 1.105);
+  close(q.installment13, q.listPrice * 1.105);
+});
