@@ -44,7 +44,8 @@ export default function Home() {
   const quotes = useMemo(() => validation.family.errors.length ? [] : calculateQuote({ region: client.region, category: client.category, filial: client.filial, members, promotion, applyChildAdjustment: rules.child, applyYoungSegment: rules.young, applyFilialDiscount: rules.filial }), [client.region, client.category, client.filial, members, promotion, rules, validation.family.errors.length]);
   const selected = quotes.find((q) => q.plan === selectedPlan) ?? quotes[0];
   const validity = useMemo(() => addBusinessDays(client.issueDate, 7), [client.issueDate]);
-  const canContinue = Object.keys(validation.errors).length === 0;
+  const stepOneErrors = ["sellerName", "phone", "clientName", "dni"].filter((key) => validation.errors[key]);
+  const canContinue = stepOneErrors.length === 0;
   const familyValid = validation.family.errors.length === 0;
 
   function updateMember(id: number, patch: Partial<Member>) {
