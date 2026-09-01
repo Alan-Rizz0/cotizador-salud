@@ -32,7 +32,6 @@ function addBusinessDays(source: string, amount: number) {
 export default function Home() {
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const [step, setStep] = useState(1);
-  const [seller, setSeller] = useState({ name: "", phone: "" });
   const [client, setClient] = useState<{ name: string; dni: string; region: Region; category: Category; filial: string; issueDate: string }>({ name: "", dni: "", region: "AMBA", category: "Voluntario", filial: "", issueDate: today });
   const [members, setMembers] = useState<Member[]>([{ id: 1, role: "Titular", age: 30, contributionType: "Sin aportes", grossSalary: 0 }]);
   const [discountPercent, setDiscountPercent] = useState(0);
@@ -40,11 +39,11 @@ export default function Home() {
   const [selectedPlans, setSelectedPlans] = useState<PlanName[]>(["Bronce"]);
   const [pdfState, setPdfState] = useState<"idle"|"generating"|"done"|"error">("idle");
 
-  const validation = useMemo(() => validateQuoteForm({ sellerName:seller.name, phone:seller.phone, clientName:client.name, dni:client.dni, category:client.category, members }), [seller, client.name, client.dni, client.category, members]);
+  const validation = useMemo(() => validateQuoteForm({ clientName:client.name, dni:client.dni, category:client.category, members }), [client.name, client.dni, client.category, members]);
   const quotes = useMemo(() => validation.family.errors.length ? [] : calculateQuote({ region: client.region, category: client.category, filial: client.filial, members, promotion: "Sin descuento", gafDiscount: -discountPercent / 100, applyChildAdjustment: rules.child, applyYoungSegment: rules.young, applyFilialDiscount: rules.filial }), [client.region, client.category, client.filial, members, discountPercent, rules, validation.family.errors.length]);
   const selected = quotes.find((q) => q.plan === selectedPlans[0]) ?? quotes[0];
   const validity = useMemo(() => addBusinessDays(client.issueDate, 7), [client.issueDate]);
-  const stepOneErrors = ["sellerName", "phone", "clientName", "dni"].filter((key) => validation.errors[key]);
+  const stepOneErrors = ["clientName", "dni"].filter((key) => validation.errors[key]);
   const canContinue = stepOneErrors.length === 0;
   const familyValid = validation.family.errors.length === 0;
 
@@ -64,7 +63,7 @@ export default function Home() {
     if (!selected || pdfState === "generating") return;
     setPdfState("generating");
     try {
-      await downloadQuotePdf({ quoteId:`CS-${client.issueDate.replaceAll("-","")}-${client.dni.slice(-4)}`, issueDate:new Date(client.issueDate+"T12:00:00").toLocaleDateString("es-AR"), validityDate:validity.toLocaleDateString("es-AR"), seller, client, familyGroup:validation.family.group ?? "No determinado", members, plans:quotes, selectedPlans, discountPercent });
+      await downloadQuotePdf({ quoteId:`CS-${client.issueDate.replaceAll("-","")}-${client.dni.slice(-4)}`, issueDate:new Date(client.issueDate+"T12:00:00").toLocaleDateString("es-AR"), validityDate:validity.toLocaleDateString("es-AR"), client, familyGroup:validation.family.group ?? "No determinado", members, plans:quotes, selectedPlans, discountPercent });
       setPdfState("done");
     } catch { setPdfState("error"); }
   }
@@ -88,13 +87,8 @@ export default function Home() {
       <div className="workspace">
         <section className="content-card">
           {step === 1 && <div className="stage">
-            <div className="stage-title"><span>01</span><div><h2>Datos de la cotización</h2><p>Información del vendedor, asociado y condición comercial.</p></div></div>
-            <div className="section-label">Datos del vendedor</div>
-            <div className="form-grid">
-              <label>Nombre y apellido<input value={seller.name} onChange={(e)=>setSeller({...seller,name:e.target.value})} placeholder="Ej. María González"/>{validation.errors.sellerName&&<small className="field-error">{validation.errors.sellerName}</small>}</label>
-              <label>Teléfono<input value={seller.phone} onChange={(e)=>setSeller({...seller,phone:e.target.value})} placeholder="Ej. 11 5555 5555"/>{validation.errors.phone&&<small className="field-error">{validation.errors.phone}</small>}</label>
-            </div>
-            <div className="section-label">Datos del asociado</div>
+            <div className="stage-title"><span>01</span><div><h2>Datos del cliente</h2><p>Información del asociado y condición comercial.</p></div></div>
+            <div className="section-label">Datos del cliente</div>
             <div className="form-grid">
               <label>Nombre y apellido<input value={client.name} onChange={(e)=>setClient({...client,name:e.target.value})} placeholder="Ej. Nicolás Pérez"/>{validation.errors.clientName&&<small className="field-error">{validation.errors.clientName}</small>}</label>
               <label>DNI<input value={client.dni} onChange={(e)=>setClient({...client,dni:e.target.value.replace(/\D/g,"")})} placeholder="Sin puntos" inputMode="numeric"/>{validation.errors.dni&&<small className="field-error">{validation.errors.dni}</small>}</label>
@@ -158,9 +152,9 @@ export default function Home() {
     <section className="print-only print-document">
       <div className="print-head"><div className="brand"><span className="brand-mark">+</span><span>Cotizador <b>Salud</b></span></div><div><small>Fecha de emisión</small><b>{new Date(client.issueDate+"T12:00:00").toLocaleDateString("es-AR")}</b></div></div>
       <h1>Cotización de planes de salud</h1>
-      <div className="print-details"><div><h2>Asociado</h2><p><b>{client.name||"—"}</b><br/>DNI {client.dni||"—"}<br/>{client.region} · {client.category}</p></div><div><h2>Vendedor</h2><p><b>{seller.name||"—"}</b><br/>{seller.phone||"—"}</p></div><div><h2>Vigencia</h2><p><b>Hasta el {validity.toLocaleDateString("es-AR")}</b><br/>7 días hábiles</p></div></div>
-      <h2>Comparación de planes</h2>
-      <table><thead><tr><th>Plan</th><th>Precio plan</th><th>Descuentos / ajustes</th><th>IVA / aportes</th><th>Primera cuota</th><th>Desde cuota 13</th></tr></thead><tbody>{quotes.map(p=><tr className={selectedPlans.includes(p.plan)?"chosen":""} key={p.plan}><td><b>{p.plan}{selectedPlans.includes(p.plan)?" · Seleccionado":""}</b></td><td>{money.format(p.listPrice)}</td><td>{money.format(p.permanentAdjustment+p.filialDiscount+p.promotionalDiscount)}</td><td>{money.format(p.ivaOrContribution)}</td><td>{money.format(p.firstInstallment)}</td><td>{money.format(p.installment13)}</td></tr>)}</tbody></table>
+      <div className="print-details"><div><h2>Asociado</h2><p><b>{client.name||"—"}</b><br/>DNI {client.dni||"—"}<br/>{client.region} · {client.category}</p></div><div><h2>Vigencia</h2><p><b>Hasta el {validity.toLocaleDateString("es-AR")}</b><br/>7 días hábiles</p></div></div>
+      <h2>Planes seleccionados</h2>
+      <table><thead><tr><th>Plan</th><th>Precio plan</th><th>Descuentos / ajustes</th><th>IVA / aportes</th><th>Primera cuota</th><th>Desde cuota 13</th></tr></thead><tbody>{quotes.filter(p=>selectedPlans.includes(p.plan)).map(p=><tr className="chosen" key={p.plan}><td><b>{p.plan} · Seleccionado</b></td><td>{money.format(p.listPrice)}</td><td>{money.format(p.permanentAdjustment+p.filialDiscount+p.promotionalDiscount)}</td><td>{money.format(p.ivaOrContribution)}</td><td>{money.format(p.firstInstallment)}</td><td>{money.format(p.installment13)}</td></tr>)}</tbody></table>
       <h2>Grupo familiar</h2><table><thead><tr><th>Integrante</th><th>Edad</th><th>Aporte informado</th></tr></thead><tbody>{members.map(m=><tr key={m.id}><td>{m.role}</td><td>{m.age} años</td><td>{client.category==="Obligatorio"?m.contributionType:"No corresponde"}</td></tr>)}</tbody></table>
       <div className="print-promo">Descuento: <b>{discountPercent}%</b>. Planes seleccionados: <b>{selectedPlans.join(", ")}</b>.</div>
       <div className="legal"><h2>Información importante</h2><ol>{legalNotes.map(note=><li key={note}>{note}</li>)}</ol><p><b>Validación pendiente:</b> aunque los datos provienen de la matriz comercial, esta versión debe completar la batería de pruebas antes de considerarse contractualmente exacta.</p></div>
