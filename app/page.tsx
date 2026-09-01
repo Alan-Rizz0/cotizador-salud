@@ -2,6 +2,8 @@
 
 import { useMemo, useState } from "react";
 import { calculateQuote, type Category, type ContributionType, type Member, type MemberRole, type PlanName, type Region, PROMOTION_OPTIONS } from "@/lib/cotizador-engine";
+import { validateQuoteForm } from "@/lib/validations";
+import { downloadQuotePdf } from "@/lib/pdf-generator";
 
 const legalNotes = [
   "La presente cotización no contempla casos de alto costo y baja incidencia.",
@@ -36,18 +38,29 @@ export default function Home() {
   const [promotion, setPromotion] = useState("Sin descuento");
   const [rules, setRules] = useState({ child: false, young: false, filial: false });
   const [selectedPlan, setSelectedPlan] = useState<PlanName>("Bronce");
+  const [pdfState, setPdfState] = useState<"idle"|"generating"|"done"|"error">("idle");
 
-  const quotes = useMemo(() => calculateQuote({ region: client.region, category: client.category, filial: client.filial, members, promotion, applyChildAdjustment: rules.child, applyYoungSegment: rules.young, applyFilialDiscount: rules.filial }), [client.region, client.category, client.filial, members, promotion, rules]);
+  const validation = useMemo(() => validateQuoteForm({ sellerName:seller.name, phone:seller.phone, clientName:client.name, dni:client.dni, category:client.category, members }), [seller, client.name, client.dni, client.category, members]);
+  const quotes = useMemo(() => validation.family.errors.length ? [] : calculateQuote({ region: client.region, category: client.category, filial: client.filial, members, promotion, applyChildAdjustment: rules.child, applyYoungSegment: rules.young, applyFilialDiscount: rules.filial }), [client.region, client.category, client.filial, members, promotion, rules, validation.family.errors.length]);
   const selected = quotes.find((q) => q.plan === selectedPlan) ?? quotes[0];
   const validity = useMemo(() => addBusinessDays(client.issueDate, 7), [client.issueDate]);
-  const canContinue = seller.name.trim() && seller.phone.trim() && client.name.trim() && client.dni.trim();
+  const canContinue = Object.keys(validation.errors).length === 0;
+  const familyValid = validation.family.errors.length === 0;
 
   function updateMember(id: number, patch: Partial<Member>) {
     setMembers((current) => current.map((member) => member.id === id ? { ...member, ...patch } : member));
   }
   function addMember(role: MemberRole = "Hijo/a") {
-    if (members.length >= 11) return;
+    if (members.length >= 11 || role === "Titular" || (role === "Cónyuge" && members.some((m)=>m.role==="Cónyuge"))) return;
     setMembers((current) => [...current, { id: Date.now(), role, age: role === "Hijo/a" ? 0 : 30, contributionType: "Sin aportes", grossSalary: 0 }]);
+  }
+  async function createPdf() {
+    if (!selected || pdfState === "generating") return;
+    setPdfState("generating");
+    try {
+      await downloadQuotePdf({ quoteId:`CS-${client.issueDate.replaceAll("-","")}-${client.dni.slice(-4)}`, issueDate:new Date(client.issueDate+"T12:00:00").toLocaleDateString("es-AR"), validityDate:validity.toLocaleDateString("es-AR"), seller, client, familyGroup:validation.family.group ?? "No determinado", members, plans:quotes, selectedPlan });
+      setPdfState("done");
+    } catch { setPdfState("error"); }
   }
 
   return <main>
@@ -72,13 +85,13 @@ export default function Home() {
             <div className="stage-title"><span>01</span><div><h2>Datos de la cotización</h2><p>Información del vendedor, asociado y condición comercial.</p></div></div>
             <div className="section-label">Datos del vendedor</div>
             <div className="form-grid">
-              <label>Nombre y apellido<input value={seller.name} onChange={(e)=>setSeller({...seller,name:e.target.value})} placeholder="Ej. María González"/></label>
-              <label>Teléfono<input value={seller.phone} onChange={(e)=>setSeller({...seller,phone:e.target.value})} placeholder="Ej. 11 5555 5555"/></label>
+              <label>Nombre y apellido<input value={seller.name} onChange={(e)=>setSeller({...seller,name:e.target.value})} placeholder="Ej. María González"/>{validation.errors.sellerName&&<small className="field-error">{validation.errors.sellerName}</small>}</label>
+              <label>Teléfono<input value={seller.phone} onChange={(e)=>setSeller({...seller,phone:e.target.value})} placeholder="Ej. 11 5555 5555"/>{validation.errors.phone&&<small className="field-error">{validation.errors.phone}</small>}</label>
             </div>
             <div className="section-label">Datos del asociado</div>
             <div className="form-grid">
-              <label>Nombre y apellido<input value={client.name} onChange={(e)=>setClient({...client,name:e.target.value})} placeholder="Ej. Nicolás Pérez"/></label>
-              <label>DNI<input value={client.dni} onChange={(e)=>setClient({...client,dni:e.target.value.replace(/\D/g,"")})} placeholder="Sin puntos" inputMode="numeric"/></label>
+              <label>Nombre y apellido<input value={client.name} onChange={(e)=>setClient({...client,name:e.target.value})} placeholder="Ej. Nicolás Pérez"/>{validation.errors.clientName&&<small className="field-error">{validation.errors.clientName}</small>}</label>
+              <label>DNI<input value={client.dni} onChange={(e)=>setClient({...client,dni:e.target.value.replace(/\D/g,"")})} placeholder="Sin puntos" inputMode="numeric"/>{validation.errors.dni&&<small className="field-error">{validation.errors.dni}</small>}</label>
               <label>Región<select value={client.region} onChange={(e)=>setClient({...client,region:e.target.value as Region,filial:""})}>{regions.map(r=><option key={r}>{r}</option>)}</select></label>
               <label>Filial / procedencia<select value={client.filial} onChange={(e)=>setClient({...client,filial:e.target.value})}>{filiales.map(f=><option key={f} value={f}>{f || "Sin filial específica"}</option>)}</select></label>
               <label>Categoría<select value={client.category} onChange={(e)=>{const category=e.target.value as Category;setClient({...client,category});setPromotion("Sin descuento")}}><option>Voluntario</option><option>Obligatorio</option></select></label>
@@ -92,20 +105,22 @@ export default function Home() {
             <div className="members">
               {members.map((member,index)=><div className="member-row exact" key={member.id}>
                 <span className="member-number">{String(index+1).padStart(2,"0")}</span>
-                <label>Integrante<select value={member.role} disabled={index===0} onChange={(e)=>updateMember(member.id,{role:e.target.value as MemberRole})}><option>Titular</option><option>Cónyuge</option><option>Hijo/a</option><option>Familiar a cargo</option></select></label>
-                <label>Edad<input type="number" min="0" max="99" value={member.age} onChange={(e)=>updateMember(member.id,{age:Math.min(99,Math.max(0,Number(e.target.value)))})}/></label>
+                <label>Integrante<select value={member.role} disabled={index===0} onChange={(e)=>updateMember(member.id,{role:e.target.value as MemberRole})}><option disabled>Titular</option><option disabled={members.some((m)=>m.role==="Cónyuge"&&m.id!==member.id)}>Cónyuge</option><option>Hijo/a</option><option>Familiar a cargo</option></select></label>
+                <label>Edad<input type="number" min="0" max="99" step="1" required value={member.age} onChange={(e)=>updateMember(member.id,{age:Number(e.target.value)})}/></label>
                 {client.category === "Obligatorio" && <><label>Aporte<select value={member.contributionType} onChange={(e)=>updateMember(member.id,{contributionType:e.target.value as ContributionType})}>{contributionTypes.map(x=><option key={x}>{x}</option>)}</select></label>{!String(member.contributionType).startsWith("Monotributo") && member.contributionType !== "Sin aportes" && <label>Sueldo bruto<input type="number" min="0" value={member.grossSalary || ""} placeholder="$ 0" onChange={(e)=>updateMember(member.id,{grossSalary:Math.max(0,Number(e.target.value))})}/></label>}</>}
-                {index>0 && <button className="remove" onClick={()=>setMembers(current=>current.filter(x=>x.id!==member.id))}>×</button>}
+                {index>0 && <button className="remove" aria-label={`Eliminar ${member.role}`} onClick={()=>setMembers(current=>current.filter(x=>x.id!==member.id))}>×</button>}
               </div>)}
             </div>
-            <div className="member-adds"><button className="add" onClick={()=>addMember("Cónyuge")}>+ Cónyuge</button><button className="add" onClick={()=>addMember("Hijo/a")}>+ Hijo/a</button><button className="add" onClick={()=>addMember("Familiar a cargo")}>+ Familiar a cargo</button></div>
+            <div className="member-adds"><button className="add" disabled={members.some((m)=>m.role==="Cónyuge")} onClick={()=>addMember("Cónyuge")}>+ Cónyuge</button><button className="add" disabled={members.filter((m)=>m.role==="Hijo/a").length>=8} onClick={()=>addMember("Hijo/a")}>+ Hijo/a</button><button className="add" disabled={members.some((m)=>m.role==="Familiar a cargo")} onClick={()=>addMember("Familiar a cargo")}>+ Familiar a cargo</button></div>
+            {validation.errors.contribution&&<p className="form-error" role="alert">{validation.errors.contribution}</p>}
+            {!!validation.family.errors.length&&<div className="form-error" role="alert" aria-live="polite">{validation.family.errors.map((error)=><p key={error}>{error}</p>)}</div>}
             <div className="promo"><div><span className="promo-icon">%</span><div><strong>Descuento promocional</strong><small>Esquema temporal definido en Políticas Comerciales</small></div></div><select value={promotion} onChange={(e)=>setPromotion(e.target.value)}>{Object.keys(PROMOTION_OPTIONS[client.category]).map(x=><option key={x}>{x}</option>)}</select></div>
             <div className="rule-switches">
               <label><input type="checkbox" checked={rules.child} onChange={(e)=>setRules({...rules,child:e.target.checked})}/><span><b>Ajuste de hijos</b><small>AMBA −45% · Interior −55%</small></span></label>
               <label><input type="checkbox" checked={rules.young} onChange={(e)=>setRules({...rules,young:e.target.checked})}/><span><b>Segmento joven</b><small>Según edad, región y plan</small></span></label>
               <label><input type="checkbox" checked={rules.filial} onChange={(e)=>setRules({...rules,filial:e.target.checked})}/><span><b>Descuento filial</b><small>Solo cuando corresponde</small></span></label>
             </div>
-            <div className="actions"><button className="secondary" onClick={()=>setStep(1)}>← Volver</button><button className="primary" onClick={()=>setStep(3)}>Calcular cotización <span>→</span></button></div>
+            <div className="actions"><button className="secondary" onClick={()=>setStep(1)}>← Volver</button><button className="primary" disabled={!familyValid||!!validation.errors.contribution} onClick={()=>setStep(3)}>Calcular cotización <span>→</span></button></div>
           </div>}
 
           {step === 3 && <div className="stage quote-stage">
@@ -121,13 +136,14 @@ export default function Home() {
               </article>)}
             </div>
             <p className="estimate-warning"><b>Estado de validación:</b> el motor utiliza precios y reglas extraídos del Excel, pero la equivalencia integral continúa sujeta a pruebas contra casos comerciales reales.</p>
-            <div className="actions no-print"><button className="secondary" onClick={()=>setStep(2)}>← Modificar datos</button><button className="primary" onClick={()=>window.print()}>Descargar cotización en PDF</button></div>
+            <div className="actions no-print"><button className="secondary" onClick={()=>setStep(2)}>← Modificar datos</button><button className="primary" disabled={pdfState==="generating"} onClick={createPdf}>{pdfState==="generating"?"Generando PDF…":"Descargar cotización en PDF"}</button></div>
+            <span className="sr-status" aria-live="polite">{pdfState==="done"?"PDF generado.":pdfState==="error"?"No se pudo generar el PDF.":""}</span>
           </div>}
         </section>
 
         <aside className="summary no-print">
           <p className="eyebrow">Resumen</p><h3>Tu cotización</h3>
-          <dl><div><dt>Asociado</dt><dd>{client.name||"Sin completar"}</dd></div><div><dt>Región</dt><dd>{client.region}</dd></div><div><dt>Categoría</dt><dd>{client.category}</dd></div><div><dt>Grupo familiar</dt><dd>{members.length} {members.length===1?"integrante":"integrantes"}</dd></div><div><dt>Promoción</dt><dd>{promotion}</dd></div>{step===3&&<div><dt>Plan elegido</dt><dd>{selectedPlan}</dd></div>}</dl>
+          <dl><div><dt>Estado</dt><dd>{familyValid&&canContinue?"Lista":"Incompleta"}</dd></div><div><dt>Asociado</dt><dd>{client.name||"Sin completar"}</dd></div><div><dt>DNI</dt><dd>{client.dni||"—"}</dd></div><div><dt>Región</dt><dd>{client.region}</dd></div><div><dt>Categoría</dt><dd>{client.category}</dd></div><div><dt>Grupo familiar</dt><dd>{validation.family.group??"No compatible"}</dd></div><div><dt>Integrantes</dt><dd>{members.length}</dd></div><div><dt>Promoción</dt><dd>{promotion}</dd></div>{step===3&&<><div><dt>Plan elegido</dt><dd>{selectedPlan}</dd></div><div><dt>Primera cuota</dt><dd>{selected?money.format(selected.firstInstallment):"—"}</dd></div></>}</dl>
           <div className="summary-bottom"><span className="shield">✓</span><p><b>Motor auditable</b><br/>Cada resultado conserva la referencia de las tablas utilizadas.</p></div>
         </aside>
       </div>
