@@ -14,7 +14,7 @@ Plata y Platinum.
 
 ## Fuente y alcance
 
-Las tablas fueron trasladadas desde la matriz comercial de agosto de 2026. El
+Las tablas fueron trasladadas desde la matriz comercial provisoria de septiembre de 2026. El
 archivo Excel original no forma parte del repositorio. El motor conserva un
 desglose auditable, pero la aplicación mantiene el estado de validación
 pendiente hasta completar la homologación comercial integral.

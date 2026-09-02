@@ -3,7 +3,7 @@ import type { Member, PlanResult } from "./cotizador-engine";
 
 type PdfInput = {
   quoteId: string; issueDate: string; validityDate: string;
-  client: { name: string; dni: string; region: string; category: string };
+  client: { name: string; region: string; category: string };
   familyGroup: string; members: Member[]; plans: PlanResult[];
   selectedPlans: string[]; discountPercent: number;
 };
@@ -33,7 +33,7 @@ export async function downloadQuotePdf(input: PdfInput) {
 
   page.drawRectangle({ x: 42, y: 646, width: 511, height: 72, color: mint, borderColor: border, borderWidth: 1 });
   text(page, bold, input.client.name, 58, 690, 14);
-  text(page, regular, `DNI ${input.client.dni}  ·  ${input.client.region}  ·  ${input.client.category}`, 58, 672, 9, gray);
+  text(page, regular, `${input.client.region}  ·  ${input.client.category}`, 58, 672, 9, gray);
   text(page, regular, input.familyGroup, 58, 655, 9, gray);
   text(page, bold, `Descuento ${input.discountPercent}%`, 435, 682, 11, teal);
 
