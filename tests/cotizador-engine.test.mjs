@@ -74,9 +74,17 @@ test("aportes e IVA se calculan por caminos distintos", () => {
   close(mandatory.ivaOrContribution, -71145); close(voluntary.ivaOrContribution, voluntary.listPrice * .105);
 });
 
-test("descuento manual de 50% se aplica a la primera cuota", () => {
-  const q = plan({ region: "AMBA", category: "Voluntario", gafDiscount: -.50, members: [{ id: 1, role: "Titular", age: 38 }] });
-  close(q.promotionalDiscount, q.listPrice * -.50);
-  close(q.firstInstallment, q.listPrice * .50 * 1.105);
-  close(q.installment13, q.listPrice * 1.105);
+test("opción 5 agrega 5% durante seis cuotas a las opciones 1 a 3", () => {
+  const q = plan({ region: "AMBA", category: "Voluntario", promotion: "Opción 1", provenanceBonus: true, members: [{ id: 1, role: "Titular", age: 38 }] });
+  close(q.promotionalDiscount, q.listPrice * -.35);
+  assert.deepEqual(q.promotionSchedule.map(({from,to,rate})=>({from,to,rate})), [
+    { from: 1, to: 3, rate: .35 }, { from: 4, to: 5, rate: .25 },
+    { from: 6, to: 6, rate: .15 }, { from: 7, to: 7, rate: .10 },
+  ]);
+});
+
+test("opción 4 con débito mantiene el descuento hasta cuota 24", () => {
+  const q = plan({ region: "AMBA", category: "Obligatorio", promotion: "Opción 4", automaticDebit: true, members: [{ id: 1, role: "Titular", age: 38 }] });
+  close(q.installment13, q.listPrice * .80);
+  assert.deepEqual(q.promotionSchedule.map(({from,to,rate})=>({from,to,rate})), [{ from: 1, to: 24, rate: .20 }]);
 });

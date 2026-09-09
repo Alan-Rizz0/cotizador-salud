@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { calculateQuote, type Category, type ContributionType, type Member, type MemberRole, type PlanName, type Region } from "@/lib/cotizador-engine";
+import { calculateQuote, PROMOTION_OPTIONS, type Category, type ContributionType, type Member, type MemberRole, type PlanName, type Region } from "@/lib/cotizador-engine";
 import { validateQuoteForm } from "@/lib/validations";
 import { downloadQuotePdf } from "@/lib/pdf-generator";
 
@@ -18,6 +18,7 @@ const regions: Region[] = ["AMBA", "Norte", "Sur", "Patagonia", "Bahía / Mar de
 const filiales = ["", "CABA", "GBA Sur", "GBA Oeste", "GBA Norte", "Córdoba", "Corrientes", "Misiones", "Tucumán", "Salta", "Jujuy", "Santa Fe", "Bahía Blanca", "Mar del Plata", "Comahue", "Patagonia Norte", "Patagonia Sur", "Mendoza", "Mercedes", "Rosario", "San Juan"];
 const contributionTypes: ContributionType[] = ["Sin aportes", "OBRAS SOCIALES", "Medife", "OSPSA", "OSSSB", "Unificado", "Monotributo A", "Monotributo B", "Monotributo C", "Monotributo D", "Monotributo E", "Monotributo F", "Monotributo G", "Monotributo H", "Monotributo I", "Monotributo J", "Monotributo K"];
 const money = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 });
+const scheduleText = (items: {from:number;to:number;rate:number}[]) => items.length ? items.map(x => `Cuota${x.from===x.to?"":"s"} ${x.from===x.to?x.from:`${x.from}–${x.to}`}: ${Math.round(x.rate*100)}%`).join(" · ") : "Sin descuento promocional";
 
 function addBusinessDays(source: string, amount: number) {
   const date = new Date(source + "T12:00:00");
@@ -34,13 +35,15 @@ export default function Home() {
   const [step, setStep] = useState(1);
   const [client, setClient] = useState<{ name: string; region: Region; category: Category; filial: string; issueDate: string }>({ name: "", region: "AMBA", category: "Voluntario", filial: "", issueDate: today });
   const [members, setMembers] = useState<Member[]>([{ id: 1, role: "Titular", age: 30, contributionType: "Sin aportes", grossSalary: 0 }]);
-  const [discountPercent, setDiscountPercent] = useState(0);
+  const [promotion, setPromotion] = useState("Sin descuento");
+  const [provenanceBonus, setProvenanceBonus] = useState(false);
+  const [automaticDebit, setAutomaticDebit] = useState(false);
   const [rules, setRules] = useState({ child: false, young: false, filial: false });
   const [selectedPlans, setSelectedPlans] = useState<PlanName[]>(["Bronce"]);
   const [pdfState, setPdfState] = useState<"idle"|"generating"|"done"|"error">("idle");
 
   const validation = useMemo(() => validateQuoteForm({ clientName:client.name, category:client.category, members }), [client.name, client.category, members]);
-  const quotes = useMemo(() => validation.family.errors.length ? [] : calculateQuote({ region: client.region, category: client.category, filial: client.filial, members, promotion: "Sin descuento", gafDiscount: -discountPercent / 100, applyChildAdjustment: rules.child, applyYoungSegment: rules.young, applyFilialDiscount: rules.filial }), [client.region, client.category, client.filial, members, discountPercent, rules, validation.family.errors.length]);
+  const quotes = useMemo(() => validation.family.errors.length ? [] : calculateQuote({ region: client.region, category: client.category, filial: client.filial, members, promotion, provenanceBonus, automaticDebit, applyChildAdjustment: rules.child, applyYoungSegment: rules.young, applyFilialDiscount: rules.filial }), [client.region, client.category, client.filial, members, promotion, provenanceBonus, automaticDebit, rules, validation.family.errors.length]);
   const selected = quotes.find((q) => q.plan === selectedPlans[0]) ?? quotes[0];
   const validity = useMemo(() => addBusinessDays(client.issueDate, 7), [client.issueDate]);
   const stepOneErrors = ["clientName"].filter((key) => validation.errors[key]);
@@ -63,7 +66,7 @@ export default function Home() {
     if (!selected || pdfState === "generating") return;
     setPdfState("generating");
     try {
-      await downloadQuotePdf({ quoteId:`CS-${client.issueDate.replaceAll("-","")}-${crypto.randomUUID().slice(0,6).toUpperCase()}`, issueDate:new Date(client.issueDate+"T12:00:00").toLocaleDateString("es-AR"), validityDate:validity.toLocaleDateString("es-AR"), client, familyGroup:validation.family.group ?? "No determinado", members, plans:quotes, selectedPlans, discountPercent });
+      await downloadQuotePdf({ quoteId:`CS-${client.issueDate.replaceAll("-","")}-${crypto.randomUUID().slice(0,6).toUpperCase()}`, issueDate:new Date(client.issueDate+"T12:00:00").toLocaleDateString("es-AR"), validityDate:validity.toLocaleDateString("es-AR"), client, familyGroup:validation.family.group ?? "No determinado", members, plans:quotes, selectedPlans, promotion });
       setPdfState("done");
     } catch { setPdfState("error"); }
   }
@@ -113,7 +116,12 @@ export default function Home() {
             <div className="member-adds"><button className="add" disabled={members.some((m)=>m.role==="Cónyuge")} onClick={()=>addMember("Cónyuge")}>+ Cónyuge</button><button className="add" disabled={members.filter((m)=>m.role==="Hijo/a").length>=8} onClick={()=>addMember("Hijo/a")}>+ Hijo/a</button><button className="add" disabled={members.some((m)=>m.role==="Familiar a cargo")} onClick={()=>addMember("Familiar a cargo")}>+ Familiar a cargo</button></div>
             {validation.errors.contribution&&<p className="form-error" role="alert">{validation.errors.contribution}</p>}
             {!!validation.family.errors.length&&<div className="form-error" role="alert" aria-live="polite">{validation.family.errors.map((error)=><p key={error}>{error}</p>)}</div>}
-            <div className="promo"><div><span className="promo-icon">%</span><div><strong>Descuento</strong><small>Seleccioná un valor entre 0% y 50%</small></div></div><select value={discountPercent} onChange={(e)=>setDiscountPercent(Number(e.target.value))}>{Array.from({length:11},(_,index)=>index*5).map(value=><option key={value} value={value}>{value}%</option>)}</select></div>
+            <div className="promo promo-policy"><div><span className="promo-icon">%</span><div><strong>Promoción estratégica</strong><small>Porcentajes y períodos definidos en el Excel</small></div></div><select value={promotion} onChange={(e)=>{setPromotion(e.target.value);setProvenanceBonus(false);setAutomaticDebit(false)}}>{Object.keys(PROMOTION_OPTIONS[client.category]).map(value=><option key={value}>{value}</option>)}</select></div>
+            <div className="promotion-detail" aria-live="polite"><b>{promotion}</b><span>{scheduleText(quotes[0]?.promotionSchedule ?? [])}</span>{promotion==="Opción 4"&&<small>Requiere procedencia comprobable.</small>}{promotion==="Opción 7"&&<small>Exclusiva para ex asociados; no acumulable.</small>}</div>
+            <div className="rule-switches promo-rules">
+              <label className={!client.filial||!["Opción 1","Opción 2","Opción 3"].includes(promotion)?"disabled":""}><input type="checkbox" disabled={!client.filial||!["Opción 1","Opción 2","Opción 3"].includes(promotion)} checked={provenanceBonus} onChange={(e)=>setProvenanceBonus(e.target.checked)}/><span><b>Extra por procedencia</b><small>5% adicional, cuotas 1 a 6 · opciones 1, 2 o 3</small></span></label>
+              <label className={promotion!=="Opción 4"?"disabled":""}><input type="checkbox" disabled={promotion!=="Opción 4"} checked={automaticDebit} onChange={(e)=>setAutomaticDebit(e.target.checked)}/><span><b>Débito automático</b><small>Extiende la promoción de procedencia hasta la cuota 24</small></span></label>
+            </div>
             <div className="rule-switches">
               <label><input type="checkbox" checked={rules.child} onChange={(e)=>setRules({...rules,child:e.target.checked})}/><span><b>Ajuste de hijos</b><small>AMBA −45% · Interior −55%</small></span></label>
               <label><input type="checkbox" checked={rules.young} onChange={(e)=>setRules({...rules,young:e.target.checked})}/><span><b>Segmento joven</b><small>Según edad, región y plan</small></span></label>
@@ -129,8 +137,9 @@ export default function Home() {
               {quotes.map((plan,index)=><article className={`plan ${selectedPlans.includes(plan.plan)?"selected":""}`} key={plan.plan} onClick={()=>togglePlan(plan.plan)} role="checkbox" aria-checked={selectedPlans.includes(plan.plan)} tabIndex={0} onKeyDown={(e)=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();togglePlan(plan.plan)}}}>
                 {selectedPlans.includes(plan.plan) && <span className="recommended">✓ Seleccionado</span>}
                 <div className="plan-index">0{index+1}</div><h3>{plan.plan}</h3>
-                <div className="price"><small>Primera cuota</small><strong>{money.format(plan.firstInstallment)}</strong><em>Descuento {discountPercent}%</em></div>
+                <div className="price"><small>Primera cuota</small><strong>{money.format(plan.firstInstallment)}</strong><em>{promotion}</em></div>
                 <div className="later"><span>Desde cuota 13</span><b>{money.format(plan.installment13)}</b></div>
+                <div className="plan-schedule">{scheduleText(plan.promotionSchedule)}</div>
                 <details><summary>Ver cálculo</summary><dl className="breakdown"><div><dt>Precio del plan</dt><dd>{money.format(plan.listPrice)}</dd></div><div><dt>Ajustes permanentes</dt><dd>{money.format(plan.permanentAdjustment)}</dd></div><div><dt>Descuento filial</dt><dd>{money.format(plan.filialDiscount)}</dd></div><div><dt>Promoción</dt><dd>{money.format(plan.promotionalDiscount)}</dd></div><div><dt>{client.category==="Voluntario"?"IVA 10,5%":"Aportes"}</dt><dd>{money.format(plan.ivaOrContribution)}</dd></div></dl></details>
               </article>)}
             </div>
@@ -142,7 +151,7 @@ export default function Home() {
 
         <aside className="summary no-print">
           <p className="eyebrow">Resumen</p><h3>Tu cotización</h3>
-          <dl><div><dt>Estado</dt><dd>{familyValid&&canContinue?"Lista":"Incompleta"}</dd></div><div><dt>Asociado</dt><dd>{client.name||"Sin completar"}</dd></div><div><dt>Región</dt><dd>{client.region}</dd></div><div><dt>Categoría</dt><dd>{client.category}</dd></div><div><dt>Grupo familiar</dt><dd>{validation.family.group??"No compatible"}</dd></div><div><dt>Integrantes</dt><dd>{members.length}</dd></div><div><dt>Descuento</dt><dd>{discountPercent}%</dd></div>{step===3&&<><div><dt>Planes elegidos</dt><dd>{selectedPlans.join(", ")}</dd></div><div><dt>Primera cuota</dt><dd>{selected?money.format(selected.firstInstallment):"—"}</dd></div></>}</dl>
+          <dl><div><dt>Estado</dt><dd>{familyValid&&canContinue?"Lista":"Incompleta"}</dd></div><div><dt>Asociado</dt><dd>{client.name||"Sin completar"}</dd></div><div><dt>Región</dt><dd>{client.region}</dd></div><div><dt>Categoría</dt><dd>{client.category}</dd></div><div><dt>Grupo familiar</dt><dd>{validation.family.group??"No compatible"}</dd></div><div><dt>Integrantes</dt><dd>{members.length}</dd></div><div><dt>Promoción</dt><dd>{promotion}</dd></div>{step===3&&<><div><dt>Planes elegidos</dt><dd>{selectedPlans.join(", ")}</dd></div><div><dt>Primera cuota</dt><dd>{selected?money.format(selected.firstInstallment):"—"}</dd></div></>}</dl>
           <div className="summary-bottom"><span className="shield">✓</span><p><b>Motor auditable</b><br/>Cada resultado conserva la referencia de las tablas utilizadas.</p></div>
         </aside>
       </div>
@@ -155,7 +164,7 @@ export default function Home() {
       <h2>Planes seleccionados</h2>
       <table><thead><tr><th>Plan</th><th>Precio plan</th><th>Descuentos / ajustes</th><th>IVA / aportes</th><th>Primera cuota</th><th>Desde cuota 13</th></tr></thead><tbody>{quotes.filter(p=>selectedPlans.includes(p.plan)).map(p=><tr className="chosen" key={p.plan}><td><b>{p.plan} · Seleccionado</b></td><td>{money.format(p.listPrice)}</td><td>{money.format(p.permanentAdjustment+p.filialDiscount+p.promotionalDiscount)}</td><td>{money.format(p.ivaOrContribution)}</td><td>{money.format(p.firstInstallment)}</td><td>{money.format(p.installment13)}</td></tr>)}</tbody></table>
       <h2>Grupo familiar</h2><table><thead><tr><th>Integrante</th><th>Edad</th><th>Aporte informado</th></tr></thead><tbody>{members.map(m=><tr key={m.id}><td>{m.role}</td><td>{m.age} años</td><td>{client.category==="Obligatorio"?m.contributionType:"No corresponde"}</td></tr>)}</tbody></table>
-      <div className="print-promo">Descuento: <b>{discountPercent}%</b>. Planes seleccionados: <b>{selectedPlans.join(", ")}</b>.</div>
+      <div className="print-promo">Promoción: <b>{promotion}</b>. {scheduleText(selected?.promotionSchedule ?? [])}. Planes seleccionados: <b>{selectedPlans.join(", ")}</b>.</div>
       <div className="legal"><h2>Información importante</h2><ol>{legalNotes.map(note=><li key={note}>{note}</li>)}</ol><p><b>Validación pendiente:</b> aunque los datos provienen de la matriz comercial, esta versión debe completar la batería de pruebas antes de considerarse contractualmente exacta.</p></div>
     </section>
   </main>;

@@ -20,7 +20,8 @@ export type QuoteInput = {
   filial?: string;
   members: Member[];
   promotion?: string;
-  gafDiscount?: number;
+  provenanceBonus?: boolean;
+  automaticDebit?: boolean;
   applyChildAdjustment?: boolean;
   applyYoungSegment?: boolean;
   applyFilialDiscount?: boolean;
@@ -35,7 +36,7 @@ export type PlanResult = {
   ivaOrContribution: number;
   firstInstallment: number;
   installment13: number;
-  promotionSchedule: { from: number; to: number; rate: number }[];
+  promotionSchedule: { from: number; to: number; rate: number; amount: number }[];
   trace: string[];
 };
 
@@ -48,6 +49,7 @@ const PROMOTIONS: Record<Category, Record<string, { from: number; to: number; ra
     "Opción 2": [{ from: 1, to: 3, rate: .30 }, { from: 4, to: 9, rate: .10 }],
     "Opción 3": [{ from: 1, to: 10, rate: .15 }],
     "Opción 4": [{ from: 1, to: 12, rate: .15 }],
+    "Opción 7": [{ from: 1, to: 24, rate: .25 }],
   },
   Obligatorio: {
     "Sin descuento": [],
@@ -55,6 +57,7 @@ const PROMOTIONS: Record<Category, Record<string, { from: number; to: number; ra
     "Opción 2": [{ from: 1, to: 6, rate: .30 }, { from: 7, to: 9, rate: .10 }],
     "Opción 3": [{ from: 1, to: 11, rate: .20 }],
     "Opción 4": [{ from: 1, to: 12, rate: .20 }],
+    "Opción 7": [{ from: 1, to: 24, rate: .25 }],
   },
 };
 
@@ -120,8 +123,15 @@ export function calculateQuote(input: QuoteInput): PlanResult[] {
   const contribution = input.category === "Obligatorio"
     ? input.members.reduce((sum, member) => sum + estimateContribution(member), 0)
     : 0;
-  const schedule = PROMOTIONS[input.category][input.promotion ?? "Sin descuento"] ?? [];
-  const firstPromo = schedule.find((x) => x.from <= 1 && x.to >= 1)?.rate ?? 0;
+  const promotion = input.promotion ?? "Sin descuento";
+  const baseSchedule = PROMOTIONS[input.category][promotion] ?? [];
+  const monthlyRates = Array.from({ length: 24 }, (_, index) => {
+    const month = index + 1;
+    let rate = baseSchedule.find((item) => month >= item.from && month <= item.to)?.rate ?? 0;
+    if (input.provenanceBonus && ["Opción 1", "Opción 2", "Opción 3"].includes(promotion) && month <= 6) rate += .05;
+    if (input.automaticDebit && promotion === "Opción 4" && month >= 13) rate = input.category === "Voluntario" ? .15 : .20;
+    return Number(Math.min(rate, .50).toFixed(4));
+  });
   const childMembers = input.members.filter((m) => m.role === "Hijo/a" && (input.region !== "AMBA" || m.age <= 29));
   const youngAdults = input.members.filter((m) => (m.role === "Titular" || m.role === "Cónyuge") && m.age <= 29);
 
@@ -156,17 +166,31 @@ export function calculateQuote(input: QuoteInput): PlanResult[] {
 
     const nominalPrice = listPrice + permanentAdjustment;
     const filialDiscount = input.applyFilialDiscount ? nominalPrice * filialRate(input.filial, plan, input.category) : 0;
-    const gafDiscount = nominalPrice * Math.max(-.85, Math.min(0, input.gafDiscount ?? 0));
-    const promotionalDiscount = nominalPrice * -firstPromo + gafDiscount;
+    const firstPromo = monthlyRates[0];
+    const promotionalDiscount = nominalPrice * -firstPromo;
     const discounted = nominalPrice + filialDiscount + promotionalDiscount;
     const ivaOrContribution = input.category === "Voluntario" ? discounted * .105 : -contribution;
     const firstInstallment = Math.max(0, discounted + ivaOrContribution);
-    const installment13Tax = input.category === "Voluntario" ? nominalPrice * .105 : -contribution;
-    const installment13 = Math.max(0, nominalPrice + installment13Tax);
+    const amountForMonth = (month: number) => {
+      const discountedMonth = nominalPrice + filialDiscount - nominalPrice * monthlyRates[month - 1];
+      const taxOrContribution = input.category === "Voluntario" ? discountedMonth * .105 : -contribution;
+      return Math.max(0, discountedMonth + taxOrContribution);
+    };
+    const installment13 = amountForMonth(13);
+    const promotionSchedule: PlanResult["promotionSchedule"] = [];
+    monthlyRates.forEach((rate, index) => {
+      if (!rate) return;
+      const month = index + 1;
+      const previous = promotionSchedule.at(-1);
+      if (previous && previous.rate === rate && previous.to === month - 1) previous.to = month;
+      else promotionSchedule.push({ from: month, to: month, rate, amount: amountForMonth(month) });
+    });
     trace.push(input.category === "Voluntario" ? "AMBA/Interior: IVA 10,5%" : "C aux: aportes estimados");
-    if (firstPromo) trace.push(`Políticas Comerciales: ${input.promotion}, cuota 1 -${firstPromo * 100}%`);
+    if (firstPromo) trace.push(`Políticas Comerciales: ${promotion}, cuota 1 -${firstPromo * 100}%`);
+    if (input.provenanceBonus) trace.push("Políticas Comerciales: opción 5, 5% adicional por 6 cuotas con procedencia");
+    if (input.automaticDebit) trace.push("Políticas Comerciales: opción 6, continuidad con débito automático hasta cuota 24");
 
-    return { plan, listPrice, permanentAdjustment, filialDiscount, promotionalDiscount, ivaOrContribution, firstInstallment, installment13, promotionSchedule: schedule, trace };
+    return { plan, listPrice, permanentAdjustment, filialDiscount, promotionalDiscount, ivaOrContribution, firstInstallment, installment13, promotionSchedule, trace };
   });
 }
 

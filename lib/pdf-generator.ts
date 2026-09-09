@@ -5,10 +5,13 @@ type PdfInput = {
   quoteId: string; issueDate: string; validityDate: string;
   client: { name: string; region: string; category: string };
   familyGroup: string; members: Member[]; plans: PlanResult[];
-  selectedPlans: string[]; discountPercent: number;
+  selectedPlans: string[]; promotion: string;
 };
 
 const money = (value: number) => "$ " + Math.round(value).toLocaleString("es-AR");
+const scheduleText = (plan: PlanResult) => plan.promotionSchedule.length
+  ? plan.promotionSchedule.map((item) => `${item.from === item.to ? `C${item.from}` : `C${item.from}-${item.to}`}: ${Math.round(item.rate * 100)}% (${money(item.amount)})`).join("  ·  ")
+  : "Sin descuento promocional";
 const safe = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9-]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase();
 const navy = rgb(.09, .22, .29), teal = rgb(.30, .58, .54), mint = rgb(.91, .96, .95), gray = rgb(.39, .48, .53), border = rgb(.87, .91, .90);
 
@@ -35,7 +38,7 @@ export async function downloadQuotePdf(input: PdfInput) {
   text(page, bold, input.client.name, 58, 690, 14);
   text(page, regular, `${input.client.region}  ·  ${input.client.category}`, 58, 672, 9, gray);
   text(page, regular, input.familyGroup, 58, 655, 9, gray);
-  text(page, bold, `Descuento ${input.discountPercent}%`, 435, 682, 11, teal);
+  text(page, bold, input.promotion, 435, 682, 11, teal);
 
   text(page, bold, "GRUPO FAMILIAR", 42, 616, 10, teal);
   let memberY = 596;
@@ -51,14 +54,15 @@ export async function downloadQuotePdf(input: PdfInput) {
   selectedPlans.forEach((plan, index) => {
     if (index === 2) cardY -= 118;
     const x = 42 + (index % 2) * 260;
-    page.drawRectangle({ x, y: cardY, width: 249, height: 98, color: mint, borderColor: teal, borderWidth: 2 });
+    page.drawRectangle({ x, y: cardY, width: 249, height: 108, color: mint, borderColor: teal, borderWidth: 2 });
     const accent = plan.plan === "Medifé+" ? teal : plan.plan === "Bronce" ? rgb(.63,.40,.25) : plan.plan === "Plata" ? rgb(.58,.63,.65) : navy;
-    page.drawRectangle({ x, y: cardY + 92, width: 249, height: 6, color: accent });
-    text(page, bold, plan.plan, x + 13, cardY + 71, 12);
-    text(page, bold, "SELECCIONADO", x + 150, cardY + 72, 7, teal);
-    text(page, regular, "Primera cuota", x + 13, cardY + 49, 8, gray);
-    text(page, bold, money(plan.firstInstallment), x + 13, cardY + 30, 15);
-    text(page, regular, `Desde cuota 13: ${money(plan.installment13)}`, x + 13, cardY + 13, 8, gray);
+    page.drawRectangle({ x, y: cardY + 102, width: 249, height: 6, color: accent });
+    text(page, bold, plan.plan, x + 13, cardY + 81, 12);
+    text(page, bold, "SELECCIONADO", x + 150, cardY + 82, 7, teal);
+    text(page, regular, "Primera cuota", x + 13, cardY + 59, 8, gray);
+    text(page, bold, money(plan.firstInstallment), x + 13, cardY + 40, 15);
+    text(page, regular, `Desde cuota 13: ${money(plan.installment13)}`, x + 13, cardY + 23, 8, gray);
+    text(page, regular, scheduleText(plan), x + 13, cardY + 9, 6.5, gray);
   });
 
   const detailsY = cardY - 25;
@@ -67,7 +71,8 @@ export async function downloadQuotePdf(input: PdfInput) {
   selectedPlans.forEach((plan) => {
     text(page, bold, plan.plan, 48, rowY, 9);
     text(page, regular, `Nominal: ${money(plan.listPrice)} · Ajustes: ${money(plan.permanentAdjustment + plan.filialDiscount + plan.promotionalDiscount)} · IVA/aportes: ${money(plan.ivaOrContribution)}`, 120, rowY, 8, gray);
-    rowY -= 16;
+    text(page, regular, scheduleText(plan), 120, rowY - 12, 7, gray);
+    rowY -= 29;
   });
 
   const legalY = Math.max(38, rowY - 84);
